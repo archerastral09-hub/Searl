@@ -1,0 +1,67 @@
+name: Scrape agences (Searlo)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: searlo-agences
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Scrape (logs en direct)
+        id: run
+        timeout-minutes: 345
+        env:
+          PYTHONUNBUFFERED: "1"
+          SEARLO_KEY_1: ${{ secrets.SEARLO_KEY_1 }}
+          SEARLO_KEY_2: ${{ secrets.SEARLO_KEY_2 }}
+          SEARLO_KEY_3: ${{ secrets.SEARLO_KEY_3 }}
+          INPUT_FILE: entreprises.csv
+          OUTPUT_FILE: agences.csv
+          MIN_INTERVAL: "1"
+          REQUEST_TIMEOUT: "60"
+          MAX_RUNTIME_MIN: "335"
+        run: python -u scrape_agences.py
+
+      - name: Commit agences.csv
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agences.csv
+          if ! git diff --cached --quiet; then
+            git commit -m "agences.csv : mise à jour"
+            git pull --rebase
+            git push
+          fi
+
+      - name: Sauvegarde du CSV (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agences-csv
+          path: agences.csv
+          if-no-files-found: ignore
+
+      - name: Relancer tant qu'il reste du travail
+        if: ${{ always() && steps.run.outputs.remaining > 0 && steps.run.outputs.alive > 0 && steps.run.outputs.done_this_run > 0 }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run scrape.yml --ref "${{ github.ref_name }}"
+        
